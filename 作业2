@@ -1,0 +1,756 @@
+上周主要还是刷题，看了一点大纲里面专门介绍rsa攻击的那本书，然后差不多搞了二元copersmith。
+> An important application of lattice reduction found by Coppersmith in 1996,is finding small roots of low-degree polynomial equations , This includes,modular univariate polynomial equations, and bivariate integer equations
+直接从博客复制过来的，markdown。，建议看博客吧嘻嘻：www.zbc53.top
+前面学习了一元的Coppersmith，解决了$RSA$已知因子高位，私钥低位，明文高位，以及明文相关攻击，得到解决低次多项式求小解的通法，但是我们发现对于Boneh and Durfee attack却无法解决，需要用到二元的Coppersmith 。
+参考paper:[https://www.iacr.org/archive/eurocrypt2004/30270487/bivariate.pdf][1]
+首先一个引理：
+
+> 对于整数域上的二元不可约多项式$p(x,y)$,设$\delta$为各变量的最大指数，$\delta=deg_{max(x,y)}(p(x,y))$,定义$W=max\{|a|,|b|X,c|Y|,d|XY|\}$，若$XY \lt W^{\frac{2}{3\delta}}$，那么就可以在多项式时间$(log W,2^{\delta})$时间复杂度内找到所有整数对$(x_0,y_0)$满足$p(x_0,y_0)=0$，其中$|x_0|\lt X,|y_0|\lt Y$。
+如果$\delta$为$xy$总最大指数，则边界为$XY \lt W^{\frac{1}{\delta}}$
+
+ - an Illustration:
+
+> 设一个二元不可约多项式为$p(x,y)=a+bx+cy+dxy(a\ne 0,d\ne 0)$,假设多项式有一个小根$(x_0,y_0)$,设根的上界为$X,Y$,$W=||p(xX,yY)||_{\infty}$,则$XY\lt \frac{W^{\frac{1}{2}}}{16}$时，可在多项式时间内求出根。
+
+**proof:**首先产生一个$n$,$W\lt n \lt 2W$,并且$gcd(a,n)=1$,也可以直接$n=W+((1-W)\mod{|a|})$。
+然后定义一个多项式:$q_{00}(x,y)=a^{-1}p(x,y)\mod{n}=1+b^{'}x+c^{'}y+d^{'}xy$
+那么可以考虑:$q_{10}(x,y)=nx,q_{01}(x,y)=ny,q_{11}(x,y)=nxy$对于所有$q_{ij}(x,y)$都满足$q_{ij}(x_0,y_0)\equiv 0\mod{n}$,因此我们先考虑通过$q_{00},q_{10},q_{01},q_{11}$所有整数线性组合产生一个格子：
+$$
+L=\begin{bmatrix}
+1&b^{'}X&c^{'}Y&d{'}XY\\
+&nX&&\\
+&&nY&\\
+&&&nXY\\
+\end{bmatrix}
+$$
+通过对其规约可以在多项式时间内得到$b_1$,$||b_1||\lt 2^{\frac{\omega-1}{4}}{(det(L))}^{\frac{1}{\omega}}$,此时维度$\omega=4$,格子行列式$det(L)=n^3(XY)^2$,由$b_1$可得到多项式$h(x,y)$
+$h(x,y)$满足$||h(x_0,y_0)||\lt 2n^{\frac{3}{4}}{(XY)}^{\frac{1}{2}}$。由Howgrave-Graham定理，可以证明$h(x_0,y_0)=0$意思就是在模$n$下成立，也在整数域成立。$p(x,y)$不可约，且$h(x,y)$不可能为$p(x,y)$的倍数，但是有相同解$(x_0,y_0)$。
+$$
+联立:\left \{ 
+\begin{array}{c}
+h(x,y)=0\\
+p(x,y)=0\\
+\end{array}
+\right.
+$$
+实际举个例子来实现一下$($不一定合适$)$。
+对于$p(x,y)=-93759-66666x-54321y+12345xy=a+bx+cy+dxy$,已知有解$(10,11)$，设界$X,Y$
+那么显然$W=|d|XY$,那么这里$XY=\frac{W}{|d|}\lt W^{\frac{2}{3\delta}}$其中$\delta=1$所以这里界$X,Y$可以随意取大于$(10,11)$就行，所以这个例子确实有点不适合，但是还是值得实现一下：
+    a=93759
+    b=66666
+    c=54321
+    d=12345
+
+    X=999999999999999
+    Y=999999999999
+    #得到模数n
+    n=d*X*Y+(1-d*X*Y)%a
+    #系数都乘以a的逆元
+    A=inverse_mod(a,n)
+    B=b*A
+    C=c*A
+    D=-d*A
+
+    L=matrix([[1,B*X,C*Y,D*X*Y],
+              [0,n*X,0,0],
+              [0,0,n*Y,0],
+              [0,0,0,n*X*Y]
+              ])
+    M=L.LLL()[0]
+    #创建一个二元多项式环
+    P.<x,y> = PolynomialRing(ZZ)
+    monomials=[1,x,y,x*y]
+    Divisor=[1,X,Y,X*Y]
+    h=0
+    #得到一个与p(x,y)有相同解的多项式h(x,y)
+    for i in range(4):
+        h+=monomials[i]*M[i] /Divisor[i]
+    print(h)
+    #4115*x*y - 22222*x - 18107*y - 31253
+    x=10
+    y=11
+    print(4115*x*y - 22222*x - 18107*y - 31253==0)
+    #True
+大致就这么实现，但是因为例子举得不好，有些问题。可以发现$X,Y$确实必须大于解$(10,11)$否则不对，$X,Y$与实际解越接近，格约出来的$h(x)$系数越小，越方便求解，下面补充几个引理：$($证明略掉$)$。
+**Howgrave-Graham**：
+
+> 整数域上$h(x,y)$，若$h(x,y)$最多由$\omega$个单项式相加组成，假设$h(x_0,y_0)\equiv 0\mod{n}$,并且有
+$|x_0|\lt X,|y_0|\lt Y$,$||h(xX,yY)||\lt \frac{n}{\sqrt {\omega}}$，那么$h(x_0,y_0)=0$,也就是去除了模数$n$。
+
+定义由单项式组成的多项式$h(x)=\sum\limits_{i=0}^n h_ix^i$ ${||h(x)||}^2=\sum\limits_{i=0}^i {|h_i|}^2 $,$ ||h(x)||_{\infty}=max(|h_i|)$
+**Lemma1**:
+
+> 对于两个整数域上的非零多项式$a(x,y),b(x,y)$,$x,y$最高次数均为$d$,如果$a(x,y)|b(x,y)$,那么有$||b||\ge 2^{-{(d+1)}^2}||a||_{\infty}$。
+
+**Lemma2:**
+
+> 在**Lemma1**的基础上，若$a(0,0)\ne 0$且有一个非零整数$r$满足$r|b(x,y),gcd(r,a(0,0))=1$,那么$r*a(x,y)|b(x,y)$且$||b||\ge 2^{-{(d+1)}^2}||r||a||_{\infty}$
+
+ - **summary:**
+
+令$p(x,y)=\sum\limits_{0\le i,j \le \delta} F_{i,j},x^iy^j$，其中$\delta=deg_{max(x,y)}(p(x,y))$ $W=||p(xX,yY)||_{\infty}$，假设$p_{00}\ne 0,gcd(p_{00},XY)=1$,选择一个自然数$k$,令$\omega={(\delta+k+1)}^2$,生成$\mu$满足$\sqrt {\omega}2^{-\omega}W\le \mu \lt 2W$,$gcd(p_{00},\mu)=1$,同之前也可以选择$\mu=W+((1-W)\mod{|p_{00}|})$,令$n=\mu{(XY)}^k$,则有$gcd(p_{00},n)=1$,$\sqrt {\omega}2^{-\omega}{(XY)}^kW\le \mu \lt {(XY)}^k2W$,还是需要通过一些$q_{ij}(x,y)$构造格子，其中$q_{ij}(x,y)$满足$q_{ij}{(x_0,y_0)}\equiv 0\mod{n}$,容易得到规约出来的$h(x)$最多由$\omega$个单项式组成，拿到的$h(x,y)$应该足够小：
+
+ - 使得在整数域上$h(x_0,y_0)=0$,即$||h(xX,yY)||\lt\frac{n}{\sqrt {\omega}}$
+ - 使得$p(x,y)\nmid h(x,y)$，即$||h(xX,yY)||\lt 2^{-\omega}{(XY)}^kW$
+拿到$h(x,y)$后同上处理，求出$(x_0,y_0)$即可。下面是当$\omega=k=1$的格子示例。
+![2021-04-18T15:06:14.png][2]
+有两个小问题：
+ - 若$p(0,0)=0$,那么$p(x,y)$可写成$xa(x,y)+yb(x,y)$,其中$a(x,y)$的次数最多$\delta-1$,那么$a(x,y)$最多有$\delta-1$个根，那么$a(i,0),0\lt i\lt \delta$至少有一个非零解， 就可以用$p(x,y)=p(x+i,y)$替代原来的多项式，最后$x_0={x_0}^{-i}$
+ - 若$gcd(p(0,0),XY)\ne 1$,那么可以生成两个素数$X\lt X^{'}\lt 2X,Y\lt Y^{'}\lt 2Y$来替代$X,Y$
+
+界限问题以及证明略去；二元Coppersmith 也可以通过$shift$方法来扩大边界：
+比如已知$f(x,y)\equiv 0\mod{p}$,来构造一个小系数的$g(xX,yY)$,需要进行**x-shift,y-shift**，但是基本上都要**保持齐次**
+x-shift:$g_{i,\iota,m}(x,y)=x^i{f(x,y)}^{\iota}e^{m-\iota}$
+y-shift:$h_{j,\iota,m}(x,y)=y^j{f(x,y)}^{\iota}e^{m-\iota}$
+且$g_{i,\iota,m}(x_0,y_0)\equiv h_{j,\iota,m}(x_0,y_0)\equiv 0$
+paper:[https://link.springer.com/content/pdf/10.1007%2F3-540-45708-9_16.pdf][3]
+![2021-04-18T15:09:01.png][4]
+差不多就这样，后面通过实例具体实现一下。
+
+**继续推广到三元**,$paper$原话：
+![2021-04-18T15:05:03.png][5]
+
+ - **$example1:mrctf[strange\_CTR]$**
+
+![2021-04-19T02:24:44.png][7]
+给的$d$很长但是只能说明$d_p=d\mod{p-1},d_q=a\mod{q-1}$，这在$rsa$入门题型中已知$p,q,d_p,d_q,c$中推过的。可以发现的是$d_q$很小，或许是个切入点？
+参考paper:[https://link.springer.com/content/pdf/10.1007%2F3-540-45708-9_16.pdf][6]
+首先根据$d_q=d\mod{q-1}$得到$ed_q+k(q-1)=1$,那么$ed_q-(k+1)=-kq$令$x=d_q,y=k+1$
+$f(x,y)=ex-y\equiv 0\mod{q}$存在一个$(x_0,y_0)$。
+这就是一个典型的二元$Coppersmith $，首先我们需要确定$x_0,y_0$的界$X,Y$,设$d_q \lt N^{\delta}= X$
+$|k+1|=\frac{|ed_q-2|}{q-1}\lt\frac{ed_q}{q-1}\lt \frac{q-1}{2}d_q\lt N^{\beta+\delta}=Y$
+整理一下就是：一个二元模$p$下的多项式$f(x,y)=ex-y$有根$(x_0,y_0)$其中$|x_0|\lt X,|y_0|\lt Y$
+利用$x-shift$方法$g_{i,j,m}(x,y)=N^{max(0,m-j)}x^i{f(x,y)}^{j}$
+当然所有$g_{i,j,m}(x,y)$都必须满足$g(x_0,y_0)\equiv 0\mod{p^m}$
+然后我们就可以利用$g_{i,j,m}(xX,yY),j=0,...n-1;i=n-j-1$,这样出来每个$g(x,y)$的单项式都是$n-1$次的。
+比如$n=4,m=2$我们可以造一个四维的格子:
+$$
+L=\begin{bmatrix}
+N^2X^3& & &  \\
+eNX^3 &-NX^2Y & & \\
+e^2X^3&-2eX^2Y&XY^2& \\
+e^3X^3&-3e^2X^2Y&3eXY^2&-Y^3\\
+\end{bmatrix}
+$$
+从上到下分别是$j=0,i=3...$时候的$x-shift$方法找到的多项式$g(x,y)$,具体实现：
+    N = 7194944829894746935571965271122989443610702698015123026500274312320541540511952275333536082176132102091625202863345739074691901574020649953130369453360247690506566827078013306825941200018330639608298539682191482947557146237487451707849833303794107411686130468587672820352641436722348277258977791778239539008852841749667581869688275892813664557078043533743669277649148468667399393518112220602616186358353262921270486781426670131125521444335280904901224934061164334131460273779473387748722008412594372005590209919098686472153912130124772089012962023984089123929555594332030502775588070235834837667605812843128059372243
+    e = 5872666789397408936685003821802975734744078884385553897196686533187747297681714766542317071546532454504513425295170366015384657690105523240363850101369048640430719519784564240908244756652800934680608667950183962226340288720771217107508516125044088043789281574833079766048266075717484676158307477384862873719462770774288252074344824446884295300603035728339571606659365040029505127532956295163195257002051007447197735267997104725561159289832252522298457628452222155625714679911912616173849423059919537353814530280736653541415686756485413316581322357887750268983241858913704388088485132644523120028234659344174431547087
+    beta = 0.34
+    delta = 0.02
+
+    X=floor(N^delta)
+    Y=floor(N^(beta+delta))
+
+    L=matrix([[N^2*X^3,0,0,0],
+              [e*N*X^3,-N*X^2*Y,0,0],
+              [e^2*X^3,-2*e*X^2*Y,X*Y^2,0],
+              [e^3*X^3,-3*e^2*X^2*Y,3*e*X*Y^2,-Y^3]
+              ])
+    M=L.LLL()[0]
+
+    P.<x,y> = PolynomialRing(ZZ)
+    monomials=[x^3,x^2*y,x*y^2,y^3]
+    Divisor=[X^3,X^2*Y,X*Y^2,Y^3]
+
+    h=0
+    for i in range(4):
+        h+=monomials[i]*M[i] /Divisor[i]
+    print(h)
+    h.factor()
+    # 144242809483056840663075735623298553029680437297789965222541248349475437890222709450048997656976387390752105996145725490546933534602744908786700426835710727511955799912350818546609860818884274334936799981304721460528637717*x + 636751972323*y
+
+    k=144242809483056840663075735623298553029680437297789965222541248349475437890222709450048997656976387390752105996145725490546933534602744908786700426835710727511955799912350818546609860818884274334936799981304721460528637717
+    k=k+1
+    dq=636751972323
+    q=(e*dq-1)//k +1
+    p=N//q
+    phi=(p-1)*(q-1)
+    d=inverse_mod(e,phi)
+    c=6601667269134560091452287214083525217696007424340765571114688738279264700361513951309195757650152324371826111195352731779137577044473630747863137747356695892337017953751159248388157498368915463745769509485009626774902347006319659852239932231921393353157319713540010424345134411781723171111939891127671029064626426950125001347122070491553845919803891156107693973027238705710354919725550360159383455222982999904576805089837067774838194257113022653159325313574447189639317397889065351340828031907571541750274329094240472180870714728295651611160552345500801797030280900507979459558944006193012524181456837126192865748097
+    m=pow(c,d,N)
+    from Crypto.Util.number import *
+    print(long_to_bytes(m))
+    #MRCTF{Y0u_3h0u1d_kn0w_C0opp3r_3m1th_v3ry_W31l}
+最后一步得到$h(x,y)$后？？怎么处理才是最好呢？
+
+ - **Boneh and Durfee attack**
+可参考：[https://eprint.iacr.org/2017/835.pdf][8]
+对于$d$较小时，比winner攻击更强一些。
+$ed=k\phi n+1$
+$k(N-p-q+1)+1\equiv 0\mod{e}$
+$2k(\frac{N+1}{2}+\frac{-p-q}{2})+1\equiv 0\mod{e}$
+设$A=\frac{N+1}{2},y=\frac{-p-q}{2}$,$x=2k$，可得式子$f(x,y)=x(A+y)+1\equiv 0\mod{e}$
+其中$|y|\lt 2N^{\frac{1}{2}},|x|\lt\frac{2ed}{\phi n} \lt \frac{3ed}{N}=3\frac{e}{N}d\lt 3\frac{e}{N}N^{detla}$,预估$detla\lt 0.292$,实现好难。。靠，勉强看懂github的代码删去了看起来没用的代码：
+    def boneh_durfee(pol, modulus, mm, tt, XX, YY):
+        PR.<u, x, y> = PolynomialRing(ZZ)
+        Q = PR.quotient(x*y + 1 - u) # u = xy + 1
+        polZ = Q(pol).lift()
+
+        UU = XX*YY + 1
+        # x-shifts
+        gg = []
+        for kk in range(mm + 1):
+            for ii in range(mm - kk + 1):
+                xshift = x^ii * modulus^(mm - kk) * polZ(u, x, y)^kk
+                gg.append(xshift)
+        gg.sort()
+
+        # x-shifts list of monomials
+        monomials = []
+        for polynomial in gg:
+            for monomial in polynomial.monomials():
+                if monomial not in monomials:
+                    monomials.append(monomial)
+        monomials.sort()
+        
+        # y-shifts (selected by Herrman and May)
+        for jj in range(1, tt + 1):
+            for kk in range(floor(mm/tt) * jj, mm + 1):
+                yshift = y^jj * polZ(u, x, y)^kk * modulus^(mm - kk)
+                yshift = Q(yshift).lift()
+                gg.append(yshift) # substitution
+        
+        # y-shifts list of monomials
+        for jj in range(1, tt + 1):
+            for kk in range(floor(mm/tt) * jj, mm + 1):
+                monomials.append(u^kk * y^jj)
+
+        # construct lattice B
+        nn = len(monomials)
+        BB = Matrix(ZZ, nn)
+        for ii in range(nn):
+            BB[ii, 0] = gg[ii](0, 0, 0)
+            for jj in range(1, ii + 1):
+                if monomials[jj] in gg[ii].monomials():
+                    BB[ii, jj] = gg[ii].monomial_coefficient(monomials[jj]) * monomials[jj](UU,XX,YY)
+
+        BB = BB.LLL()
+        found_polynomials = False    
+        for pol1_idx in range(nn - 1):
+            for pol2_idx in range(pol1_idx + 1, nn):
+                PR.<w,z> = PolynomialRing(ZZ)
+                pol1 = pol2 = 0
+                for jj in range(nn):
+                    pol1 += monomials[jj](w*z+1,w,z) * BB[pol1_idx, jj] / monomials[jj](UU,XX,YY)
+                    pol2 += monomials[jj](w*z+1,w,z) * BB[pol2_idx, jj] / monomials[jj](UU,XX,YY)
+
+                PR.<q> = PolynomialRing(ZZ)
+                rr = pol1.resultant(pol2)
+
+                if rr.is_zero() or rr.monomials() == [1]:
+                    continue
+                else:
+                    found_polynomials = True
+                    break
+            if found_polynomials:
+                break
+
+        rr = rr(q, q)
+        
+        rr.factor()
+        soly = rr.roots()
+        #print(soly)
+        soly = soly[0][0]
+        ss = pol1(q, soly)
+        solx = ss.roots()[0][0]
+        return solx, soly
+
+    def example():
+        N = 0xc2fd2913bae61f845ac94e4ee1bb10d8531dda830d31bb221dac5f179a8f883f15046d7aa179aff848db2734b8f88cc73d09f35c445c74ee35b01a96eb7b0a6ad9cb9ccd6c02c3f8c55ecabb55501bb2c318a38cac2db69d510e152756054aaed064ac2a454e46d9b3b755b67b46906fbff8dd9aeca6755909333f5f81bf74db
+        e = 0x19441f679c9609f2484eb9b2658d7138252b847b2ed8ad182be7976ed57a3e441af14897ce041f3e07916445b88181c22f510150584eee4b0f776a5a487a4472a99f2ddc95efdd2b380ab4480533808b8c92e63ace57fb42bac8315fa487d03bec86d854314bc2ec4f99b192bb98710be151599d60f224114f6b33f47e357517
+        delta = .18
+        m = 4
+        t = int((1-2*delta) * m)
+        X = 2*floor(N^delta) 
+        Y = floor(N^(1/2))   
+
+        P.<x,y> = PolynomialRing(ZZ)
+        A = int((N+1)/2)
+        pol = 1 + x * (A + y)
+        solx, soly = boneh_durfee(pol, e, m, t, X, Y)
+        print("d:",pol(solx,soly)/e)
+
+    if __name__ == "__main__":
+        example()
+
+他这个令$u=xy+1$ $f(u,x,y)=u+xy$,总的来说就是$x-shift$和$y-shift$,然后构造一个格子，在格约出的一系列小向量中选出合适的向量求出得到$h(x,y)$,然后先后求出$x,y$,后面再细看一下，对于$x-shift$和$y-shift$,以及格约出$h(x,y)$的求解过程，造出格子是整个过程最重要的地方。
+
+ - conclusion:
+相比一元多了$y-shift$,情况更复杂，从**边界的确定**到**格子的构造**以及**最终求解**，增大边界的方法$shift$,都得好好看看，还是那句话，会不会存在一种最优的构造方式呢？
+自此我们似乎找到了求一类问题的通解：求低次一元或多元多项式的小根？后续遇到相关题继续深化吧
+
+  [1]: https://www.iacr.org/archive/eurocrypt2004/30270487/bivariate.pdf
+  [2]: /usr/uploads/2021/04/3156779701.png
+  [3]: https://link.springer.com/content/pdf/10.1007%2F3-540-45708-9_16.pdf
+  [4]: /usr/uploads/2021/04/2712819909.png
+  [5]: /usr/uploads/2021/04/2608246081.png
+  [6]: https://link.springer.com/content/pdf/10.1007%2F3-540-45708-9_16.pdf
+  [7]: /usr/uploads/2021/04/1664944331.png
+  [8]: https://eprint.iacr.org/2017/835.pdf
+  This paper mainly records some attack methods in the book
+
+ - **chosen ciphertext attack**
+
+> $\,\,\,\,\,$Suppose an adversary is given a ciphertext:$c=m^e\mod{n}$ and wants to compute $m$
+
+select:$X$,$X\in Z_n,gcd(X,n)=1$
+compute:$c_0=cX^e\mod{n}$
+so we can get: $m_0={c_0}^d={(cx^e)}^d=c^dx^{ed}=mX\mod{n}$
+then:$m=m_0X^{-1}\mod{n}$
+ - **a homomorphic property** 
+$\,\,\,\,\,$RSA is mostly used to encrypt short messages,and $c=m^e\mod{n}$,Suppose $m$ can factored into $m_1,m_2$，a meet-in-the-middle attack,then for each $m_1$，get all $m_1^e\mod{n}$,finally for each $m_2$,it follows that:
+if $m_2\,$ satisfy $\,c{m_2}^{-e}={(m_1m_2)}^em_2^{-e}==m_1^e\mod{n}$
+get $m=m_1m_2$。
+ - **solve linear equations**
+
+> When a linear multivariate equation is known to have a small solution it is often possible to find that solution using a heuristic lattice-based method that tries to find a certain smallest vector in a lattice.
+
+
+for example:$Ax+By+Cz=w$,the x,y,z,w$\in Z\,$is unknown。
+then is can be:$(x,y,z)$ $\begin{bmatrix}1&0&A\\0&1&C\\0&0&B\\\end{bmatrix}=(x,z,w)$
+$\,\,\,\,\,$It's important to define the boundaries，it must satisfy:$\lambda_1(L) \le \sqrt n {det(L)}^{\frac{1}{n}}$。we can solve the linear equation by simply solving the smallest vector problem for this lattice $L$，
+
+ - **modular linear equations**
+$\,\,\,\,\,$similarly，for example:$Ax+By+cZ=w\mod{N}$
+$Ax+By+Cz=w+kN$,then:$(x,y,z,-k)$ $\begin{bmatrix}1&0&0&A\\0&1&0&B\\0&0&1&C\\0&0&0&N\\\end{bmatrix}=(x,y,z,w)$
+
+ - **Coppersmith’s Methods**：
+
+> An important application of lattice reduction found by Coppersmith in 1996,is finding small roots of low-degree polynomial equations , This includes,modular univariate polynomial equations, and bivariate integer equations
+
+$\,\,\,\,\,$ For details, please refer to the previous article。
+
+ - **Some Early Attacks**
+$\,\,\,\,\,$ 1.Common Modulus Attack
+for:$c_1=m^{e_1}\mod{N},c_2=m^{e_2}\mod{N},gcd(e_1,e_2)=1$
+we can compute:$e_1x+e_2y=1$[Extended Euclidean algorithm][1]
+so:$c_1^{x}c_2^{y}=m^{e_1x}m^{e_2y}=m\mod{N}$
+$\,\,\,\,\,$ **Theorem**：pubkey:$(e,N)$,private key:$(d,N)$,and another pubkey:$(e_1,N),e_1\ne e$
+then:$d_1={e_1}^{-1}\mod{\frac{ed-1}{gcd(e_1,ed-1)}}$
+**H˚astad’s Broadcast Attack**:
+ -  **Common Plaintext Attack**
+
+> $\,\,\,\,\,$A protocol failure occurs when the same plaintext m is encrypted with several public keys $(e,N_i)$
+
+let $(e,N_1),..(e,N_l),l\ge e$,we use the Chinese Remainder Theorem to compute $C=m^e\mod{N}$,$m^e\lt N$,so $m=\sqrt[e]C$[the Chinese Remainder Theorem][2]。
+
+ - **Related Plaintext Attack**
+
+> In this context, the plaintexts $_i$ are related if $m_i = f_i(m)$ for some (known) polynomials $f_i(x)$。
+
+$\,\,\,\,\,$let $(e_1,N_1),..(e_l,N_l),l\ge max_i(e_ideg(f_i(x)))$,then give $c_i=(f_i(m))^{e_i}\mod{N_i}$ $f_i(x)$ is monic,the plaintxt $m$ can be computed,$M\lt every\,N_i$
+proof:$\delta=max_i(e_ideg(f_i(x)))$,for $i\in [1,l]$,
+define:$g_i(x)=x^{h_i}({f_i(x)}^{e_i}-c_i)\in N_i$，where $h_i=\delta-deg(f_i(x))$
+notice that these polynomials  satisfy:$g_i(m)=0\mod{N_i}$
+we can use the Chinese Remainder Theorem using $g_i(x),N_i$,get:$G(m)\equiv 0\mod{N}$
+$m\lt N_0$,$N_0=min\{N_1,N_2,...N_i\}$,Using Coppersmith’s method can compute m。
+
+ - **Cycle Attack**
+${c^e}^{(l+1)}\equiv c\mod{N}$,${c^e}^l\mod{N}=m$,this method is very slow and for a large key it is not a practical attack.
+
+**Small Public Exponent Attacks**
+
+ -  **Stereotyped Message Attack**
+
+> $\,\,\,\,\,$ When part of a plaintext message is known it is possible to recover the entire plaintext if both the public exponent and the size of the unknown part are sufficiently small.
+
+Using Coppersmith’s method can compute m,for example:
+$m=2^{k_2}m_2+2^{k_1}x+m_0$,$m^e\mod{N}=c$,$|x|\lt N^{\frac{1}{e}}$
+$f_N(x)=2^{-k_1e}({(m_22^{k_2}+2^{k_1}x+m_0)}^e-c)\mod{N}$,then Coppersmith get $x$
+
+ - **Related Message Attacks**
+$e=3,m^e\mod{N}=c_1,f(x)=ax+b,{f(m)}^e\mod{N}=c_2$
+give $a,b,c_1,c_2,N$ $m_1=\frac{b(c_2+2a^3c_1-b^3)}{a(c_2-a^3c_1+2b^3)}\mod{N}$
+
+$$
+or\left \{ 
+\begin{array}{c}
+f_1=x^e-c_1=0\mod{N}\\
+f_2={f(x)}^e-c_2=0\mod{N}\\
+\end{array}
+\right.
+$$
+let $g(x)=gcd(f_1,f_2)$，if $g(x)=x-M$,then get $m=M$
+another example:
+
+$$
+e=5:\left \{ 
+\begin{array}{c}
+c_1=m^e\mod{N}\\
+c_2={(am+b)}^e\mod{N}\\
+c_3={(am-b)}^e\mod{N}\\
+\end{array}
+\right.
+$$ 
+$$\frac{c_2+c_3+8a^5c_1)b}{(c_2-c_3+8b^5)a}\equiv m\mod{N}$$
+
+ - **Random Padding Attack**
+$(e,N),e=3,{m_1}^e=c_1\mod{N},{(m_1+b)}^e=c_2\mod{N},m_2=m_1+b$,$|b|\lt N^{\frac{1}{9}}$
+
+$$Resultant\_{m_1}({m_1}^3-c_1,{(m_1+b)}^3-c_2)$$ $$b^9+(3c_1-3c_2)b^6+(3{c_1}^2+21c_1c_2+3{c_2}^2)b^3+{(c_1-c_2)}^3=0\mod{N}$$
+let $x=b^3$
+$f_N(x)=x^3+(3c_1-3c_2)x^2+(3{c_1}^2+21c_1c_2+3{c_2}^2)x+{(c_1-c_2)}^3=0\mod{N}$
+then using coppersmith method.
+
+ - **Leaking Information**
+
+> some information about the private exponent can be exposed when a small public exponent is used,but it is not a security risk.
+
+for example:$e=3,ed=k\phi n -1,k=2\lt e$
+roughly $\frac{1}{2}$ of the most significant bits of the private exponent are always exposed.
+
+**Small Private Exponent Attacks**
+
+ - **Wiener’s Continued Fraction Attack**
+$$N=pq,g=gcd(p-1,q-1),s=p+q-1$$ $$\lambda(N)=lcm(p-1,q-1)=\frac{(p-1)(q-1)}{g}=\frac{N-s}{g}$$ $$ed=1+k\lambda(N)=1+\frac{k}{g}\phi N=1+\frac{k_0}{g_0}(N-s),k_0=\frac{k}{gcd(k,g)},g_0=\frac{g}{gcd(k,g)}$$ $$|\frac{e}{N}-\frac{k_0}{dg_0}|=|\frac{1}{dN}-\frac{k_0s}{dg_0N}\lt \frac{k_0s}{dg_0N}\lt \frac{1}{2{(dg_0)}^2}$$ $$ed=1+\frac{k_0}{g_0}\phi N$$ $$\Rightarrow \phi N=e\frac{dg_0}{k_0}-\frac{g_0}{k_0}=\lfloor e\frac{b_i}{a_i} \rfloor-\lfloor \frac{g_0}{k_0} \rfloor$$ $$\frac{b_i}{a_i}\,\,is\,\,the\,\,i-th \,\,convergent\,\,of\,\,\frac{e}{N}$$ $$d\lt N^{\frac{1}{4}}$$
+ - **Extending Wiener’s Attack**
+**Wiener’s Attack with Lattices**：
+ - **Heuristic Approach**
+$$ed=1+k(N-s)$$ $$(d,-k)\begin{bmatrix}N^{\frac{1}{2}}&e\\0&N\\\end{bmatrix}=(dN^{\frac{1}{2}},1-ks)$$ $$\lambda_1(L) \le \sqrt n {det(L)}^{\frac{1}{n}}$$ $$d\lt N^{\delta},\delta\lt 0.25$$
+ - **Provable Approach**
+
+> $N=pq$,$p+q\lt \frac{3}{\sqrt 2}N^{\frac{1}{2}}$ $d\lt \frac{1}{3}N^{\frac{1}{4}}$
+
+$$ed=1+k(N-s)$$ $$\Rightarrow ed+ks-1\equiv ex+y\equiv 0\mod{N}$$ $$x\lt X=\frac{1}{3}N^{\frac{1}{4}},y\lt Y=\frac{1}{\sqrt{2}}N^{\frac{3}{4}}$$ $$Using\,\,Coppersmith’s\,\,method\,\,can\,\,compute\,\,x,y$$ $$only\,\,use\,\,f_N(xX,yY),f_0(xX,yY)$$ $$L=\begin{bmatrix}NX&0\\eX&Y\\\end{bmatrix}$$
+
+ - **Boneh and Durfee’s Lattice Attacks**
+$$s=p+q-1,ed=1+K(N-s)$$ $$\Rightarrow kN-ks+1\equiv 0\mod{e}$$ $$\Rightarrow f_e(x,,y)=Nx-xy+1\equiv 0\mod{e}$$ $$e=N^{\alpha},d=N^{\delta},\delta \lt 0.2847$$ $$|x_0|=k=\frac{ed-1}{\phi n}=X,|y_0|=p+q-1\lt 3N^{\frac{1}{2}}=Y$$ $$x-shift:g_{i,\iota,m}(x,y)=x^i{f(x,y)}^{\iota}e^{max(m-\iota)}$$ $$y-shift:h_{j,\iota,m}(x,y)=y^j{f(x,y)}^{\iota}e^{max(m-\iota)}$$ $$Using\,\,the\,\,coefficient\,\,vectors\,\,of\,\,the\,\,g_{i,k}(xX, yY )\,\,and\,\,h_{j,k}(xX, yY )\,\,polynomials$$ $$g(x_0,y_0)=h(x_0,y_0)=0$$ $$\omega=\frac{(m+1)(m+2)}{2}+t(m+1),let\,\,m=2,t=1$$![2021-04-23T08:30:41.png][3]
+ - **Sub-Lattice Attack**
+ - **Bl¨omer and May’s Attack**
+**Partial Key Exposure Attacks**
+ -  **Factoring with a Hint**
+
+> $N=pq,If\,\,at\,\,least\,\,\frac{1}{2}\,\,of\,\,the\,\,most\,\,or\,\,least\,\,significant\,\,bits\,\,of\,\,one\,\,of\,\,the$ $\,\,primes\,\,is\,\,known$,$then\,\,N\,\,can\,\,be\,\,factored\,\,in\,\,time\,\,polynomial $
+
+$F(x)=(x+p_0)，using\,\,"x-shift"polynomial\,\,N,F(x),xF(x),x^2F(x)$
+$$
+construct:L=\begin{bmatrix}
+N&0&0&0\\
+p_0&X&0&0\\
+0&p_0X&X^2&0\\
+0&0&p_0X^2&X^3\\
+\end{bmatrix}
+$$
+
+  [1]: https://zh.wikipedia.org/wiki/%E6%89%A9%E5%B1%95%E6%AC%A7%E5%87%A0%E9%87%8C%E5%BE%97%E7%AE%97%E6%B3%95
+  [2]: https://en.wikipedia.org/wiki/Chinese_remainder_theorem
+  [3]: /usr/uploads/2021/04/3983462819.png
+  1.[羊城杯 2020]Invitations
+![2021-04-23T03:51:42.png][1]
+令$s^2=m$，第一组为$c_0=m^e_0\mod{N_0}$,然后依次为
+$c_1={(m+pading)}^{e_1}\mod{N_1},c_i={(m+i*pading)}^{e_i}\mod{N_i}$,$e_i\in[3,5,7]$
+采用：Hastad’s Broadcast Attack攻击，
+
+> $\,\,let(e_1,N_1),..(e_l,N_l)$,$l\ge max_i(e_ideg(f_i(x))) then\,\,give\,\,c_i=(f_i(m))^{e_i}\mod{N_i}$,$f_i(x)\,\,is\,\,monic,the\,\,plaintxt\,\,m\,\,can\,\,be\,\,computed\,\,M\lt min\{N_i\}$
+
+$define$:$$\delta=max_i(e_ideg(f_i(x))),for\,\,i\in [1,l]$$ $$g_i(x)=x^{h_i}({f_i(x)}^{e_i}-c_i)\in N_i where h_i=\delta-deg(f_i(x))$$ $$notice\,\,that\,\,these\,\,polynomials\,\,satisfy:g_i(m)=0\mod{N_i}$$ $$we\,\,can\,\,use\,\,the\,\,Chinese\,\,Remainder\,\,Theorem\,\,using\,\,g_i(x),N_i$$ $$get:G(m)\equiv 0\mod{N}$$ $$m\lt N_0,N_0=min\{N_1,N_2,...N_i\}$$ $$Using\,\,Coppersmith’s\,\,method\,\,can\,\,compute\,\,m$$在前面的文章有提到，这是对于普遍情况，这里我们可以选出几$($几$\ge 3)$组$e=3$的进行攻击，就不用再将多项式化为同阶。
+    Cs = [129274519334082165644106292383763271862424981496822335330342328217347928093592453953990448827969549377883054831490973006383371688359344675312001881631556371220779971357039899721241880304156884612458373310254854821837978876725801047977081900824202659636258168216028784656056334358157381820784576207338479493823,8140023566779187828652447593867705813386781164538611122714708931585587727699213769519135028841126072130625547328311301696554048174772606261707345115571968105138543476580875347239912760797035694220505996377127309341770427102697008350472060971360460756799310951343070384766137332401117333917901167639276168214 ,25434511525127530194830986592289179576070740435049947678930286998924519588985583799757299734846614343604661534391991096353170465467791358514448923161460366596251448937540153262731348684727026598527904328268639060306102090278287818149679940661579357649191023269947102746200467430583428889484549034314463114080,9435583236354598287661880148272717764447540972316605192855157484524753847806158586224733743434644389385148450722945845355791145016665856388503878165725148745517696840251674049929524448078129458846254866804153080766917319923905682824180976106679633180818527967145571143203594244851742143986040226240019541346 ]
+    Ns =  [146694460234280339612721415368435987068740712812770728817136582256341063038147863645902264969297892447333024201649306207442798919845916187823646745721109151386096190207317810424580842120750075213595282979568495342617919336417068886973047979116994072272482630372638964064972815256237040541007947708358680368391,65031485534704406281490718325237831433086480239135617407356760819741796565231283220528137697949585150709734732370203390254643835828984376427852793969716489016520923272675090536677771074867975287284694860155903327351119710765174437247599498342292671117884858621418276613385329637307269711179183430246951756029,126172075578367446151297289668746433680600889845504078949758568698284471307000358407453139846282095477016675769468273204536898117467559575203458221600341760844973676129445394999861380625435418853474246813202182316736885441120197888145039130477114127079444939102267586634051045795627433724810346460217871661901,75691424835079457343374072990750986689075078863640186724151061449621926239051140991748483370587430224317778303489124525034113533087612981452189061743589227565099659070008017454957304620495920813121234552401715857719372861565651204968408267740732475458128601061676264465241188491988485848198323410127587280471]
+    #3,8,10,11
+
+    A=  [1, 1, 1,1]
+    B= [3^431 *3, 3^431 *8, 3^431 *10,3^431 *11]
+    e= 3
+     
+    PR.<x> = PolynomialRing(ZZ)
+    Fs = []
+     
+    for i in range(len(Cs)):
+        f =  (A[i]*x + B[i])**e - Cs[i]
+        ff = f.change_ring(Zmod(Ns[i]))
+        ff = ff.monic()
+        
+        Fs.append(f)
+     
+    F = crt(Fs, Ns)
+    M = reduce( lambda x, y: x * y, Ns )
+
+    FF = F.change_ring(Zmod(M))
+
+    m = FF.small_roots(X=2^862,beta=1)[0]
+    print(long_to_bytes(iroot(m,2)[0]))
+    #GWHT{e959e3f8e7242954b43e1b91de9886e1}Welc0metomyp4rty
+
+2.buu[uvw77ay_aiffip]
+
+> 小明听说某软件会自动备份自己的聊天记录，非常恼火，一怒之下设计了个超级基础协商协议。某天他准备和你通讯，发给你了一段协商消息，附件中还有公用生成元g和你的私钥，以及保证密钥长度的质数。那么，你们的最后协商的32位密钥是啥呢？你们共同有一个公开已知生成元g=34,你的私钥=9360,小明向你发来协商数据：57687185873717832710418532982088
+保证长度的质数为：72542982052896163041354492265957
+
+很简单的一个题，居然没人做让它一直100分。就是一个$DH$密钥交换。这里回顾一下：$Alice,Bob$在不安全的信道建立相同的密钥：
+$Alice$选择一个底数$g$,素数$p$，随机数$a$,计算$A=g^a\mod{p}$,发送$g,A,p$给$Bob$
+$Bob$选择一个随机数$b$,计算$B=g^b\mod{p}$,将$B$发送给$Alice$,同时计算$A^b\mod{p}$作为密钥$k$
+$Alice$再计算$B^a\mod{p}$作为密钥$k$，那么最终密钥是相同的。
+如果想直接破解就是离散对数问题，但是$DH$密钥交换难以抵御中间人攻击。
+将$a,A$看作$Alice$的私钥和公钥，$b,B$看作$Bob$的私钥和公钥。
+另外相似的，椭圆曲线上的密钥交换$ECDH$。
+回到这个题，只需要计算:$B=57687185873717832710418532982088$,$a=9360$
+$p=72542982052896163041354492265957$
+那么$k=pow(B,a,p)=37799067929880674766269861874334$
+
+3.[pasecactf_2019]tornado_casino
+阅读源码之后就是要求预测随机数，$python$采用的是$mt19937$算法产生随机数。如果可以直到连续$624$组数据，那么就可以对之后产生的数进行预测。之前有文章对$mt19937$详细讲过了，这里直接使用代码。
+    # right shift inverse
+    def inverse_right(res, shift):
+        tmp = res
+        bits=len(bin(res)[2:])
+        for i in range(bits // shift):
+            tmp = res ^ tmp >> shift
+        return tmp
+    # right shift with mask inverse
+    def inverse_right_mask(res, shift, mask):
+        tmp = res
+        bits=len(bin(res)[2:])
+        for i in range(bits // shift):
+            tmp = res ^ tmp >> shift & mask
+        return tmp
+    # left shift inverse
+    def inverse_left(res, shift):
+        tmp = res
+        bits=len(bin(res)[2:])
+        for i in range(bits // shift):
+            tmp = res ^ tmp << shift
+        return tmp
+    # left shift with mask inverse
+    def inverse_left_mask(res, shift, mask):
+        tmp = res
+        bits=len(bin(res)[2:])
+        for i in range(bits // shift):
+            tmp = res ^ tmp << shift & mask
+        return tmp
+    def recover(y):
+        y = inverse_right(y,18)
+        y = inverse_left_mask(y,15,4022730752)
+        y = inverse_left_mask(y,7,2636928640)
+        y = inverse_right(y,11)
+        return y 
+    def clone_mt(record):
+        state = [recover(i) for i in record]
+        gen = Random()
+        gen.setstate((3,tuple(state+[0]),None))
+        return gen
+
+    from random import *
+    from pwn import *
+    p=remote("node3.buuoj.cn",25542)
+    context.log_level="debug"
+
+    p.recvuntil("Exit\n")
+    p.sendline("2")
+    p.recvuntil("promocode:")
+    p.sendline("b33_1_4m_b3333")
+
+
+    p.recvuntil(" Exit\n")
+    p.sendline("1")
+    prng=[]
+    for _ in range(624):
+        p.recvuntil("SPIN$$$")
+        p.sendline("$")
+        p.recvuntil("It will be: ")
+        p.sendline("1")
+        number=list(p.recvuntil("\n").decode())
+        num=""
+        for i in number:
+            if i!="|":
+                num+=i
+        prng.append(int(num,16))
+
+    g = clone_mt(prng[:624])
+    for i in range(624):
+        g.getrandbits(32)
+    key = g.getrandbits(32)
+
+    p.recvuntil("SPIN$$$")
+    p.sendline("$")
+    p.recvuntil("It will be: ")
+
+    p.sendline(hex(key)[2:])
+
+    p.recvuntil("flag")
+    #flag{daf20eab-ea47-4d30-a5f8-79209c211f9c}
+4.[UTCTF2020]Cube Crypto
+
+> Mr. Anshel and Mr. Goldfeld were trying to exchange some asymmetric keys to get a shared key. They aren't very good at math, so they decided to use a Rubik's Cube instead to do the crypto. I don't think it's very secure though, I think you might be able to guess some of their keys :hmm:
+Mr. A public key: [B' U', F B F, R' D, B D']
+Mr. G public key: [R D L', D U' B, U F', L' F]
+Mr. A sends: [B D' R' D R D L' D' R D B', B D' R' D D U' B D' R D B', B D' R' D U F' D' R D B', B D' R' D L' F D' R D B']
+Mr. G sends: [U F' R D L' B' U' L D' R' F U', U F' R D L' F B F L D' R' F U', U F' R D L' R' D L D' R' F U', U F' R D L' B D' L D' R' F U']
+
+Mr. Anshel and Mr. Goldfeld,得到是[Anshel–Anshel–Goldfeld key exchange][2]
+那么根据它的意思来$A$的公钥$(a_1,a_2,...)$,$B$的公钥$(b_1,b_2,...)$。
+
+$A$发送$(A^{-1}b_1A,A^{-1}b_2A,...,A^{-1}b_nA)$,由此得到$A,A^{-1}$
+$B$发送$(B^{-1}a_1B,B^{-1}a_2B,...,B^{-1}a_nB)$,由此得到$B,B^{-1}$
+
+最终他们的共同私钥就是：$A^{-1}B^{-1}AB$
+flag{B D' R' D U F' R D L' D' R D B' L D' R' F U'}.
+
+5.[UTCTF2020]Curveball
+> My friend Shamir was trying to share the flag with me and some of the other problem writers, but he wanted to make sure it didn't get intercepted in transmission, so he split it up. He said that the secrets that he shared will help us find the flag, but I can't figure it out! These are the secrets I've gathered so far:
+$(C81E728D9D4C2F636F067F89CC14862C, $
+$31E96A93BF1A7CE1872A3CCDA6E07F86)$
+$(ECCBC87E4B5CE2FE28308FD9F2A7BAF3, $
+$ADF6E4F1052BDE978344743CCDCF5771)$
+$(E4DA3B7FBBCE2345D7772B0674A318D5,$
+$0668FBCFE4098FEA0218163AC21E6531)$
+
+Shamir秘密共享：首先给的是$md5$后的哈希值，先还原：
+$(2,5398141),(3,5398288),(5,5398756)$
+基于多项式的$lagrange$插值公式：已知$h(x)$在$k$个互不相同的点的函数值$h(x_i)$，可构造$k-1$次插值多项式：$$f(x)=\sum\limits_{j=1}^{k}h(x_j)\prod\limits_{l=1,l\ne j}^{k} \frac{x-x_l}{x_j-x_l}$$
+
+> 上述问题可认为已知$k-1$次$f(x)$的$k$个互不相同的点的函数值$f(x_i)(i=1,..k)$,构造多项式$f(x)$,若把密钥$s$视作$f(0)$,$n$个子密钥取作$f(x_i)(i=1,2,..,n)$，那么利用任意$k$的子密钥即可重构$f(x)$，从而得到密钥，这种$(k,n)-$秘密分割门限方案就是Shamir门限方案。
+
+    x1,y1=2,5398141
+    x2,y2=3,5398288
+    x3,y3=5,5398756
+    #创建一个有理数上的多项式环
+    R.<x>=QQ[]
+
+    f1=y1*(x-x2)/(x1-x2) *(x-x3)/(x1-x3)
+    f2=y2*(x-x1)/(x2-x1) *(x-x3)/(x2-x3)
+    f3=y3*(x-x1)/(x3-x1) *(x-x2)/(x3-x2)
+    fx=f1+f2+f3
+
+    print(fx)
+    #29*x^2 + 2*x + 5398021
+
+    s=fx(0)
+    print(s)
+    #5398021
+共享秘密就是$s=f(0)$。
+6.[Zer0pts2020]ROR
+$N,e$都未知，但可以知道$N$是个偶数，那么$m^e\mod{N}$的奇偶性与$m$相同，而$m$每次右移一位加密，那么每次暴露了最后一位，根据加密后结果的奇偶性可以还原$m$最后一位，依次还原$m$所有位。
+![2021-04-24T03:37:25.png][3]
+    from Crypto.Util.number import *
+    flag=""
+    with open(r"chall.txt","rb") as f:
+        for each in f.readlines():
+            last=int(each.decode()[-2])
+            
+            if last%2==0:
+                flag+="0"
+            else:
+                flag+="1"
+
+    flag=long_to_bytes(int(flag[::-1],2))
+    print(flag)
+
+    #zer0pts{0h_1t_l34ks_th3_l34st_s1gn1f1c4nt_b1t}
+
+7.[CISCN2018]sm
+![2021-04-25T02:38:12.png][4]
+意思就是如果$bchoose[i]$为$1$，则$r\oplus ps[i]$,可以所有单独看每个比特位异或$($模$2$加$)$的结果。
+比如：对于$r[i]$:
+$r[i]=p_1[i]choose[1]+p_2[i]choose[2]+p_3[i]choose[3]+...+p_n[i]choose[n]\mod{2}$
+这里$x[i]$都代表该数比特位的第$i$位，这样来看的话就更加清晰了，那么整个过程就是：
+$choose=(choose[1],choose[2],...choose[n])$
+$ps=\begin{pmatrix}p_1[1]&p_1[2]&p_1[3]&\cdots&p_1[n]\\p_2[1]&p_2[2]&p_2[3]&\cdots&p_2[n]\\\vdots&\vdots&\vdots&\ddots&\vdots\\p_n[1]&p_n[2]&p_n[3]&\cdots&p_n[n]\\\end{pmatrix}$
+$r=(r[1],r[2],r[3],...r[n])$
+最终$choose*ps=r$,$r,ps$已知，只需要矩阵求逆就可以求到$choose$然后$AES$解密即可。
+    ps=[]
+    choose=""
+
+    r=6753785483255906709117615805253027649453460653974415214642466102672301763943358839905575042938258141827000621474498066533397472809407687579125519939754658
+    r=[int(x) for x in bin(r)[2:]]
+
+    with open(r"ps","rb") as f:
+        for each in f.readlines():
+            ps.append([int(x) for x in bin(int(each.decode().strip("\n")))[2:]])
+            
+    ps=matrix(GF(2),ps)
+    r=matrix(GF(2),r)
+
+    for each in r*ps^-1:
+        for i in each:
+            choose+=str(i)
+    print(choose)
+
+    from Crypto.Util.number import *
+    from Crypto.Cipher import AES
+    import hashlib
+    import base64
+
+    choose="11011001101011001111100000101100110010001101011101010111101101011011000100011011100001010001000001111001101001101011011001011111011111010000010011010110101110100101100100101100101100100100001110000001111101001100111101111100000100011110010110000100000001001011101000011111110110111101101001000100001001000000011001111111101011001010101110110111110010100011101000000000101011100101011111001000111011001111011000010011101001111001101111100110100101110100011000101000110010111100100101111010111001101000111001110001"
+    key=long_to_bytes(int(hashlib.md5(long_to_bytes(int(choose,2))).hexdigest(),16))
+    aes_obj = AES.new(key, AES.MODE_ECB)
+    cipher=open(r"ef","rb").read()
+
+    msg=aes_obj.decrypt(base64.b64decode(cipher))
+    print(msg)
+    #flag{shemir_alotof_in_wctf_fun!}
+
+8.[b01lers2020]crypto_crossword
+一些古典密码和编码套娃：1-9关分别是：base85,简单替换密码，16进制转字符，简单替换密码，单词内字母位置交换，简单替换密码，base64,三种字符分别代表长线短线空格的摩尔斯密码，手机九宫格键盘密码，最后还原希尔密码的私钥，再解密：中间简单解密步骤就不多说了，这里再实现以下希尔密码的解密$(sagemath)$
+    #字母表
+    alp="ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    #密文
+    cipher="WKYQMRKNQLMESZLBSTIKSIPTSLELQLEFEHZZQPNBEZKNOTKJVDHWWRVAULIHXUTYUIHCJMEIXTHDVWCANBMHS"
+    #私钥
+    Key="NTXACWHILEORDERHEARTCERTS"
+    #私钥矩阵的规模
+    size=5
+
+    n = len(alp)
+    Zn = IntegerModRing(n)
+
+    Key=[[alp.index(x) for x in Key[i:i+size]]for i in range(0,len(Key),size)]
+    Key=matrix(Zn,Key)
+
+    C=[[alp.index(x) for x in cipher[i:i+size]] for i in range(0,len(cipher),size)]
+    flag=""
+    for each in C:
+        B=matrix(Zn,each)
+        X=Key^-1 *B.T
+        for i in X:
+            for j in i:
+                flag+=alp[j]
+    print(flag)
+    #MESSAGEXISXNOXBLACKXSQUARESXAMIGOXSEPARATEDXBYXSPACEXANDXENCLOSEDXINXTHEXUSUALXFORMAT             
+9.一张谍报：
+![2021-04-26T05:27:56.png][5]
+最后的是密文，可以发现前面两段话很相似，只有部分位置的字不一样，而不一样的字在密文中出现，那么就应该是一种映射关系，密文的字在第二段文字的位置对应第一段文字的位置做个替换。
+    strs1 = "今天上午，朝歌区梆子公司决定，在每天三更天不亮免费在各大小区门口设卡为全城提供二次震耳欲聋的敲更提醒，呼吁大家早睡早起，不要因为贪睡断送大好人生，时代的符号是前进。为此，全区老人都蹲在该公司东边树丛合力抵制，不给公司人员放行，场面混乱。李罗鹰住进朝歌区五十年了，人称老鹰头，几年孙子李虎南刚从东北当猎户回来，每月还寄回来几块鼹鼠干。李罗鹰当年遇到的老婆是朝歌一枝花，所以李南虎是长得非常秀气的一个汉子。李罗鹰表示：无论梆子公司做的对错，反正不能打扰他孙子睡觉，子曰：‘睡觉乃人之常情’。梆子公司这是连菩萨睡觉都不放过啊。李南虎表示：梆子公司智商捉急，小心居民猴急跳墙！这三伏天都不给睡觉，这不扯淡么！到了中午人群仍未离散，更有人提议要烧掉这个公司，公司高层似乎恨不得找个洞钻进去。直到治安人员出现才疏散人群归家，但是李南虎仍旧表示爷爷年纪大了，睡不好对身体不好。"
+    strs2 = "喵天上午，汪歌区哞叽公司决定，在每天八哇天不全免费在各大小区门脑设卡为全城提供双次震耳欲聋的敲哇提醒，呼吁大家早睡早起，不要因为贪睡断送大好人生，时代的编号是前进。为此，全区眠人都足在该公司流边草丛合力抵制，不给公司人员放行，场面混乱。李罗鸟住进汪歌区五十年了，人称眠鸟顶，几年孙叽李熬值刚从流北当屁户回来，每月还寄回来几块报信干。李罗鸟当年遇到的眠婆是汪歌一枝花，所以李值熬是长得非常秀气的一个汉叽。李罗鸟表示：无论哞叽公司做的对错，反正不能打扰他孙叽睡觉，叽叶：‘睡觉乃人之常情’。哞叽公司这是连衣服睡觉都不放过啊。李值熬表示：哞叽公司智商捉急，小心居民猴急跳墙！这八伏天都不给睡觉，这不扯淡么！到了中午人群仍未离散，哇有人提议要烧掉这个公司，公司高层似乎恨不得找个洞钻进去。直到治安人员出现才疏散人群归家，但是李值熬仍旧表示爷爷年纪大了，睡不好对身体不好。"
+    strs3 = "喵汪哞叽双哇顶，眠鸟足屁流脑，八哇报信断流脑全叽，眠鸟进北脑上草，八枝遇孙叽，孙叽对熬编叶：值天衣服放鸟捉猴顶。鸟对：北汪罗汉伏熬乱天门。合编放行，卡编扯呼。人离烧草，报信归洞，孙叽找爷爷。"
+    res = ""
+    for i in range(len(strs3)):
+        for j in range(len(strs2)):
+            if strs3[i] == strs2[j]:
+                res += strs1[j]
+                break
+                #flag{南天菩萨放鹰捉猴头}
+10.Cyber:litte Nightmares
+![2021-04-26T13:06:09.png][6]
+加密函数解密函数都给了，显然我们的目标是分解$N$得到$p,q$就可以完成解密。
+来看代码：$g1 = pow(g, r1*(p-1), N)$
+这里需要一点群论的知识，也不用：
+根据费马小定理:$p$是素数，$g$不是$p$的倍数，那么就有$g^{p-1}\mod{p}\equiv 1$,那么显然也有$g^{r_1(p-1)}\mod{p}\equiv 1$。对于这个模$p$的乘法群来说，也称$p-1$是该乘法群的一个周期。显然$g_1=g^{r_1(p-1)}\mod{N}\ne 1,(r_1不是p-1的倍数)$,那么有$gcd(g_1-1,n)=p$
+$proof:g^{r_1(p-1)}=pk_1+1,g_1+k_2pq=g^{r_1(p-1)}$,两式作差也能得到。
+    g1=9283319553892803764690461243901070663222428323113425322850741756254277368036028273335428365663191030757323877453365465554132886645468588395631445445583253155195968694862787593653053769030730815589172570039269584478526982112345274390480983685543611640614764128042195018064671336591349166188571572536295612195292864841173479903528383123563226015278849646883506520514470333897880659139687610612049230856991239192330160727258048546502899802982277188877310126410571180236389500463464659397850999622904270520629126455639717497594792781963273264274684421455422023088932590387852813426966580288533263121276557350436900246463
+    n=15046368688522729878837364795846944447584249939940259042809310309990644722874686184397211078874301515249887625469482926118729767921165680434919436001251916009731653621249173925306213496143518405636216886510423114656445458948673083827223571060637952939874530020017901480576002182201895448100262702822444377134178804257755785230586532510071013644046338971791975792507111644403115625869332161597091770842097004583717690548871004494047953982837491656373096470967389016252220593050830165369469758747361848151735684518721718721910577759955840675047364431973099362772693817698643582567162750607561757926413317531802354973847
+
+    from gmpy2 import *
+
+    p=gcd(g1-1,n)
+    q=n//p
+    c1 = 7276931928429452854246342065839521806420418866856294154132077445353136752229297971239711445722522895365037966326373464771601590080627182837712349184127450287007143044916049997542062388957038193775059765336324946772584345217059576295657932746876343366393024413356918508539249571136028895868283293788299191933766033783323506852233709102246103073938749386863417754855718482717665887208176012160888333043927323096890710493237011980243014972091979988123240671317403963855512078171350546136813316974298786004332694857700545913951953794486310691251777765023941312078456072442404873687449493571576308437181236785086220324920
+    c2 = 323136689475858283788435297190415326629231841782013470380328322062914421821417044602586721782266492137206976604934554032410738337998164019339195282867579270570771188637636630571301963569622900241602213161396475522976801562853960864577088622021373828937295792222819561111043573007672396987476784672948287600574705736056566374617963948347878220280909003723932805632146024848076789866573232781595349191010186788284504514925388452232227920241883518851862145988532377145521056940790582807479213216240632647108768886842632170415653038740093542869598364804101879631033516030858720540787637217275393603575250765731822252109
+
+    def decrypt(cipher, private):
+        c1, c2 = cipher
+        p, q = private
+        m1 = c1 * pow(q, -1, p) * q
+        m2 = c2 * pow(p, -1, q) * p
+        return (m1 + m2) % (p*q)
+
+    from Crypto.Util.number import *
+    print(long_to_bytes(decrypt((c1,c2),(p,q))))
+    #CHTB{Factoring_With_Fermats_Little_Theorem}
+拿来加密加密得flag的相关明文很可能是一句名言！！！！！
+we alone cannot change the world, but we can cast a stone across the waters to create many ripples
+  [1]: /usr/uploads/2021/04/2871631961.png
+  [2]: https://en.wikipedia.org/wiki/Anshel%E2%80%93Anshel%E2%80%93Goldfeld_key_exchange
+  [3]: /usr/uploads/2021/04/2052467587.png
+  [4]: /usr/uploads/2021/04/4096642855.png
+  [5]: /usr/uploads/2021/04/3922016621.png
+  [6]: /usr/uploads/2021/04/1863322935.png
